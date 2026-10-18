@@ -187,9 +187,6 @@ class _FeatureInputFieldState extends State<FeatureInputField> {
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
-                  inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
-                  ],
                   onTap: () => setState(() => _editing = true),
                   onChanged: _onTextChange,
                   onFieldSubmitted: (v) {
