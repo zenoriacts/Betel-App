@@ -1,0 +1,21 @@
+{
+  "classes": [
+    "Green-Leafhopper",
+    "aphid",
+    "beetle",
+    "grasshopper"
+  ],
+  "id2name": {
+    "0": "Green-Leafhopper",
+    "1": "aphid",
+    "2": "beetle",
+    "3": "grasshopper"
+  },
+  "name2id": {
+    "Green-Leafhopper": 0,
+    "aphid": 1,
+    "beetle": 2,
+    "grasshopper": 3
+  },
+  "num_classes": 4
+}

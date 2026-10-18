@@ -1,0 +1,17 @@
+{
+  "labels": [
+    "Grade A Quality",
+    "Grade B Quality",
+    "Grade C Quality",
+    "Grade D Quality",
+    "Grade E Quality"
+  ],
+  "index_to_class": {
+    "0": "Grade A Quality",
+    "1": "Grade B Quality",
+    "2": "Grade C Quality",
+    "3": "Grade D Quality",
+    "4": "Grade E Quality"
+  },
+  "num_classes": 5
+}
