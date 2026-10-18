@@ -5,6 +5,7 @@ import 'package:animate_do/animate_do.dart';
 import '../models/feature_engineering.dart';
 import '../models/onnx_predictor.dart';
 import '../theme/app_theme.dart';
+import '../utils/validators.dart';
 import '../widgets/common_widgets.dart';
 import 'result_screen.dart';
 
@@ -16,6 +17,7 @@ class YieldHomeScreen extends StatefulWidget {
 
 class _YieldHomeScreenState extends State<YieldHomeScreen>
     with SingleTickerProviderStateMixin {
+  final _formKey = GlobalKey<FormState>();
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
 
@@ -32,8 +34,29 @@ class _YieldHomeScreenState extends State<YieldHomeScreen>
     'Soil_pH': 6.0,
   };
 
+  final Map<String, String> _rawInputs = {
+    'Soil_Moisture': '60.0',
+    'Rainfall': '100.0',
+    'Humidity': '70.0',
+    'N': '135.0',
+    'P': '45.0',
+    'K': '100.0',
+    'Temperature': '29.0',
+    'Soil_pH': '6.0',
+  };
+
   final Map<String, String?> _errors = {};
   bool _isCalculating = false;
+
+  bool get _isFormValid {
+    for (final feat in BetelFeatureEngineering.baseFeatureNames) {
+      final raw = _rawInputs[feat];
+      if (FormValidators.validateFeature(feat, raw) != null) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   @override
   void initState() {
@@ -58,12 +81,10 @@ class _YieldHomeScreenState extends State<YieldHomeScreen>
     _errors.clear();
     bool valid = true;
     for (final feat in BetelFeatureEngineering.baseFeatureNames) {
-      final bounds = BetelFeatureEngineering.inputBounds[feat]!;
-      final val = _inputs[feat]!;
-      if (val < bounds['min']! || val > bounds['max']!) {
-        // Mirrors notebook: "⚠  Please enter a valid number."
-        _errors[feat] =
-            '⚠ Valid range: ${bounds['min']} – ${bounds['max']} ${BetelFeatureEngineering.featureUnits[feat]}';
+      final raw = _rawInputs[feat];
+      final err = FormValidators.validateFeature(feat, raw);
+      if (err != null) {
+        _errors[feat] = err;
         valid = false;
       }
     }
@@ -72,7 +93,8 @@ class _YieldHomeScreenState extends State<YieldHomeScreen>
   }
 
   Future<void> _predict() async {
-    if (!_validateInputs()) {
+    if (!(_formKey.currentState?.validate() ?? false) || !_isFormValid) {
+      _validateInputs();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -148,6 +170,16 @@ class _YieldHomeScreenState extends State<YieldHomeScreen>
       'Temperature': 29.0,
       'Soil_pH': 6.0,
     });
+    _rawInputs.addAll({
+      'Soil_Moisture': '60.0',
+      'Rainfall': '100.0',
+      'Humidity': '70.0',
+      'N': '135.0',
+      'P': '45.0',
+      'K': '100.0',
+      'Temperature': '29.0',
+      'Soil_pH': '6.0',
+    });
     _errors.clear();
   });
 
@@ -162,6 +194,16 @@ class _YieldHomeScreenState extends State<YieldHomeScreen>
       'Temperature': 28.5,
       'Soil_pH': 6.25,
     });
+    _rawInputs.addAll({
+      'Soil_Moisture': '65.0',
+      'Rainfall': '225.0',
+      'Humidity': '75.0',
+      'N': '150.0',
+      'P': '80.0',
+      'K': '120.0',
+      'Temperature': '28.5',
+      'Soil_pH': '6.25,',
+    });
     _errors.clear();
   });
 
@@ -169,178 +211,135 @@ class _YieldHomeScreenState extends State<YieldHomeScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
-      body: CustomScrollView(
-        slivers: [
-          // ── App bar ───────────────────────────────────────────
-          SliverAppBar(
-            expandedHeight: 128,
-            floating: false,
-            pinned: true,
-            backgroundColor: Theme.of(context).colorScheme.surface,
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
-                ),
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            AnimatedBuilder(
-                              animation: _pulseAnim,
-                              builder: (_, child) => Transform.scale(
-                                scale: _pulseAnim.value,
-                                child: child,
-                              ),
-                              child: Container(
-                                width: 42,
-                                height: 42,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  gradient: AppColors.accentGradient,
+      body: Form(
+        key: _formKey,
+        autovalidateMode: AutovalidateMode.onUserInteraction,
+        child: CustomScrollView(
+          slivers: [
+            // ── App bar ───────────────────────────────────────────
+            SliverAppBar(
+              expandedHeight: 128,
+              floating: false,
+              pinned: true,
+              backgroundColor: Theme.of(context).colorScheme.surface,
+              flexibleSpace: FlexibleSpaceBar(
+                background: Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.surface,
+                  ),
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              AnimatedBuilder(
+                                animation: _pulseAnim,
+                                builder: (_, child) => Transform.scale(
+                                  scale: _pulseAnim.value,
+                                  child: child,
                                 ),
-                                child: const Center(
-                                  child: Text(
-                                    '🌿',
-                                    style: TextStyle(fontSize: 22),
+                                child: Container(
+                                  width: 42,
+                                  height: 42,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(12),
+                                    gradient: AppColors.accentGradient,
+                                  ),
+                                  child: const Center(
+                                    child: Text(
+                                      '🌿',
+                                      style: TextStyle(fontSize: 22),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                GradientText(
-                                  'Betel Yield Predictor',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w800,
+                              const SizedBox(width: 12),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  GradientText(
+                                    'Betel Yield Predictor',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  'XGBoost · ONNX Runtime · R² 94.48%',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 11,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.onSurfaceVariant,
+                                  Text(
+                                    'XGBoost · ONNX Runtime · R² 94.48%',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.onSurfaceVariant,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            _Stat('Features', '25', AppColors.accent),
-                            const SizedBox(width: 16),
-                            _Stat('R² Test', '94.48%', AppColors.blue),
-                            const SizedBox(width: 16),
-                            _Stat('MAE', '±1.88', AppColors.purple),
-                            const SizedBox(width: 16),
-                            _Stat('MAPE', '4.94%', AppColors.accent2),
-                          ],
-                        ),
-                      ],
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              _Stat('Features', '25', AppColors.accent),
+                              const SizedBox(width: 16),
+                              _Stat('R² Test', '94.48%', AppColors.blue),
+                              const SizedBox(width: 16),
+                              _Stat('MAE', '±1.88', AppColors.purple),
+                              const SizedBox(width: 16),
+                              _Stat('MAPE', '4.94%', AppColors.accent2),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
+              title: Row(
+                children: [
+                  const Text('🌿', style: TextStyle(fontSize: 18)),
+                  const SizedBox(width: 8),
+                ],
+              ),
             ),
-            title: Row(
-              children: [
-                const Text('🌿', style: TextStyle(fontSize: 18)),
-                const SizedBox(width: 8),
-                // Text('Betel Yield Predictor',
-                //     style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.onSurface)),
-              ],
+
+            // ── Input form ────────────────────────────────────────
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+              sliver: SliverList(
+                delegate: SliverChildListDelegate([
+                  FadeInDown(
+                    duration: const Duration(milliseconds: 400),
+                    delay: const Duration(milliseconds: 40),
+                    child: _SectionLabel('Soil Conditions', '🌱'),
+                  ),
+                  ..._buildFields(['Soil_Moisture', 'Soil_pH'], 80),
+                  const SizedBox(height: 14),
+
+                  FadeInDown(
+                    duration: const Duration(milliseconds: 400),
+                    delay: const Duration(milliseconds: 140),
+                    child: _SectionLabel('Weather', '🌤️'),
+                  ),
+                  ..._buildFields(['Rainfall', 'Humidity', 'Temperature'], 180),
+                  const SizedBox(height: 14),
+
+                  FadeInDown(
+                    duration: const Duration(milliseconds: 400),
+                    delay: const Duration(milliseconds: 240),
+                    child: _SectionLabel('NPK Fertilizer', '🧪'),
+                  ),
+                  ..._buildFields(['N', 'P', 'K'], 280),
+                  const SizedBox(height: 18),
+                ]),
+              ),
             ),
-            // actions: [
-            //   PopupMenuButton<String>(
-            //     icon: Icon(Icons.tune_rounded, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            //     color: Theme.of(context).colorScheme.surface,
-            //     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12),
-            //         side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant)),
-            //     onSelected: (v) { if (v=='sample') _resetSample(); if (v=='optimal') _resetOptimal(); },
-            //     itemBuilder: (_) => [
-            //       PopupMenuItem(value: 'sample', child: Row(children: [
-            //         Icon(Icons.science_outlined, size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
-            //         const SizedBox(width: 8),
-            //         Text('Notebook sample (→35.73 leaves)',
-            //             style: GoogleFonts.inter(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
-            //       ])),
-            //       PopupMenuItem(value: 'optimal', child: Row(children: [
-            //         const Icon(Icons.auto_awesome_rounded, size: 16, color: AppColors.accent),
-            //         const SizedBox(width: 8),
-            //         Text('All optimal flags = 1',
-            //             style: GoogleFonts.inter(fontSize: 13, color: Theme.of(context).colorScheme.onSurface)),
-            //       ])),
-            //     ],
-            //   ),
-            //   const SizedBox(width: 8),
-            // ],
-          ),
-
-          // ── Input form ────────────────────────────────────────
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-            sliver: SliverList(
-              delegate: SliverChildListDelegate([
-                // // Info banner
-                // FadeInDown(duration: const Duration(milliseconds: 400), child: Container(
-                //   padding: const EdgeInsets.all(12), margin: const EdgeInsets.only(bottom: 14),
-                //   decoration: BoxDecoration(
-                //     color: AppColors.accent.withOpacity(0.06), borderRadius: BorderRadius.circular(12),
-                //     border: Border.all(color: AppColors.accent.withOpacity(0.2))),
-                //   child: Row(children: [
-                //     const Icon(Icons.memory_rounded, size: 15, color: AppColors.accent),
-                //     const SizedBox(width: 8),
-                //     Expanded(child: Text(
-                //       'Enter 8 base features → engineer_features_single() builds 25 features → '
-                //       'XGBoost ONNX model (float_input [1×25]) → Leaf_Count_per_Bed prediction.',
-                //       style: GoogleFonts.inter(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant))),
-                //   ]),
-                // )),
-
-                FadeInDown(
-                  duration: const Duration(milliseconds: 400),
-                  delay: const Duration(milliseconds: 40),
-                  child: _SectionLabel('Soil Conditions', '🌱'),
-                ),
-                ..._buildFields(['Soil_Moisture', 'Soil_pH'], 80),
-                const SizedBox(height: 14),
-
-                FadeInDown(
-                  duration: const Duration(milliseconds: 400),
-                  delay: const Duration(milliseconds: 140),
-                  child: _SectionLabel('Weather', '🌤️'),
-                ),
-                ..._buildFields(['Rainfall', 'Humidity', 'Temperature'], 180),
-                const SizedBox(height: 14),
-
-                FadeInDown(
-                  duration: const Duration(milliseconds: 400),
-                  delay: const Duration(milliseconds: 240),
-                  child: _SectionLabel('NPK Fertilizer', '🧪'),
-                ),
-                ..._buildFields(['N', 'P', 'K'], 280),
-                const SizedBox(height: 18),
-
-                // Live optimal flags
-                // FadeInDown(duration: const Duration(milliseconds: 400), delay: const Duration(milliseconds: 360),
-                //     child: _LiveFlagsCard(inputs: _inputs)),
-                // const SizedBox(height: 18),
-              ]),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
 
       // ── Predict button ────────────────────────────────────────
@@ -371,12 +370,16 @@ class _YieldHomeScreenState extends State<YieldHomeScreen>
           width: double.infinity,
           height: 52,
           child: ElevatedButton(
-            onPressed: _isCalculating ? null : _predict,
+            onPressed: (!_isFormValid || _isCalculating) ? null : _predict,
             style: ElevatedButton.styleFrom(
-              backgroundColor: _isCalculating
+              backgroundColor: (!_isFormValid || _isCalculating)
                   ? Theme.of(context).colorScheme.surfaceContainerHighest
                   : Theme.of(context).colorScheme.primary,
               foregroundColor: Theme.of(context).colorScheme.onPrimary,
+              disabledBackgroundColor:
+                  Theme.of(context).colorScheme.surfaceContainerHighest,
+              disabledForegroundColor:
+                  Theme.of(context).colorScheme.onSurfaceVariant,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -445,10 +448,18 @@ class _YieldHomeScreenState extends State<YieldHomeScreen>
                   BetelFeatureEngineering.featureDescriptions[name] ?? '',
               minValue: bounds['min']!,
               maxValue: bounds['max']!,
-              currentValue: _inputs[name]!,
+              currentValue: _inputs[name] ?? bounds['min']!,
               errorText: _errors[name],
+              validator: (v) => FormValidators.validateFeature(name, v),
+              onRawChanged: (raw) => setState(() {
+                _rawInputs[name] = raw;
+                _errors[name] = FormValidators.validateFeature(name, raw);
+                final p = double.tryParse(raw);
+                if (p != null) _inputs[name] = p;
+              }),
               onChanged: (v) => setState(() {
                 _inputs[name] = v;
+                _rawInputs[name] = v.toStringAsFixed(1);
                 _errors.remove(name);
               }),
             ),

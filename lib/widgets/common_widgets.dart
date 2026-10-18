@@ -60,6 +60,9 @@ class FeatureInputField extends StatefulWidget {
   final double minValue, maxValue, currentValue;
   final ValueChanged<double> onChanged;
   final String? errorText;
+  final FormFieldValidator<String>? validator;
+  final ValueChanged<String>? onRawChanged;
+
   const FeatureInputField({
     super.key,
     required this.featureName,
@@ -72,7 +75,10 @@ class FeatureInputField extends StatefulWidget {
     required this.currentValue,
     required this.onChanged,
     this.errorText,
+    this.validator,
+    this.onRawChanged,
   });
+
   @override
   State<FeatureInputField> createState() => _FeatureInputFieldState();
 }
@@ -80,6 +86,7 @@ class FeatureInputField extends StatefulWidget {
 class _FeatureInputFieldState extends State<FeatureInputField> {
   late TextEditingController _ctrl;
   bool _editing = false;
+  String? _inlineError;
 
   @override
   void initState() {
@@ -90,8 +97,9 @@ class _FeatureInputFieldState extends State<FeatureInputField> {
   @override
   void didUpdateWidget(FeatureInputField old) {
     super.didUpdateWidget(old);
-    if (!_editing && old.currentValue != widget.currentValue)
+    if (!_editing && old.currentValue != widget.currentValue) {
       _ctrl.text = widget.currentValue.toStringAsFixed(1);
+    }
   }
 
   @override
@@ -100,19 +108,31 @@ class _FeatureInputFieldState extends State<FeatureInputField> {
     super.dispose();
   }
 
-  void _submit(String v) {
+  void _onTextChange(String v) {
+    widget.onRawChanged?.call(v);
+    if (widget.validator != null) {
+      final err = widget.validator!(v);
+      setState(() {
+        _inlineError = err;
+      });
+    }
     final parsed = double.tryParse(v);
-    if (parsed != null)
-      widget.onChanged(parsed.clamp(widget.minValue, widget.maxValue));
-    setState(() => _editing = false);
+    if (parsed != null) {
+      widget.onChanged(parsed);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final double safeVal = widget.currentValue.clamp(
+      widget.minValue,
+      widget.maxValue,
+    );
     final double progress =
-        (widget.currentValue - widget.minValue) /
-        (widget.maxValue - widget.minValue);
-    final bool hasError = widget.errorText != null;
+        (safeVal - widget.minValue) / (widget.maxValue - widget.minValue);
+    final String? effectiveError = _inlineError ?? widget.errorText;
+    final bool hasError = effectiveError != null;
+
     Color progressColor = hasError
         ? AppColors.error
         : (progress < 0.3
@@ -152,8 +172,18 @@ class _FeatureInputFieldState extends State<FeatureInputField> {
               ),
               SizedBox(
                 width: 100,
-                child: TextField(
+                child: TextFormField(
                   controller: _ctrl,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  validator: (v) {
+                    final err = widget.validator?.call(v);
+                    if (err != _inlineError) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (mounted) setState(() => _inlineError = err);
+                      });
+                    }
+                    return err;
+                  },
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
@@ -161,8 +191,11 @@ class _FeatureInputFieldState extends State<FeatureInputField> {
                     FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
                   ],
                   onTap: () => setState(() => _editing = true),
-                  onSubmitted: _submit,
-                  onEditingComplete: () => _submit(_ctrl.text),
+                  onChanged: _onTextChange,
+                  onFieldSubmitted: (v) {
+                    setState(() => _editing = false);
+                    _onTextChange(v);
+                  },
                   textAlign: TextAlign.right,
                   style: GoogleFonts.jetBrainsMono(
                     fontSize: 15,
@@ -171,6 +204,7 @@ class _FeatureInputFieldState extends State<FeatureInputField> {
                   ),
                   decoration: InputDecoration(
                     isDense: true,
+                    errorStyle: const TextStyle(height: 0, fontSize: 0),
                     contentPadding: const EdgeInsets.symmetric(
                       horizontal: 8,
                       vertical: 8,
@@ -183,19 +217,26 @@ class _FeatureInputFieldState extends State<FeatureInputField> {
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(
-                        color: Theme.of(context).colorScheme.outlineVariant,
+                        color: hasError
+                            ? AppColors.error
+                            : Theme.of(context).colorScheme.outlineVariant,
                       ),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(
-                        color: Theme.of(context).colorScheme.outlineVariant,
+                        color: hasError
+                            ? AppColors.error
+                            : Theme.of(context).colorScheme.outlineVariant,
                       ),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
                       borderSide: BorderSide(
-                        color: Theme.of(context).colorScheme.primary,
+                        color: hasError
+                            ? AppColors.error
+                            : Theme.of(context).colorScheme.primary,
+                        width: 1.5,
                       ),
                     ),
                     filled: true,
@@ -205,13 +246,28 @@ class _FeatureInputFieldState extends State<FeatureInputField> {
               ),
             ],
           ),
-          // Error message — mirrors notebook "⚠  Please enter a valid number."
           if (hasError)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                widget.errorText!,
-                style: GoogleFonts.inter(fontSize: 11, color: AppColors.error),
+              padding: const EdgeInsets.only(top: 8),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.error_outline_rounded,
+                    size: 14,
+                    color: AppColors.error,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      effectiveError,
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.error,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           const SizedBox(height: 10),
@@ -225,15 +281,13 @@ class _FeatureInputFieldState extends State<FeatureInputField> {
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
             ),
             child: Slider(
-              value: widget.currentValue.clamp(
-                widget.minValue,
-                widget.maxValue,
-              ),
+              value: safeVal,
               min: widget.minValue,
               max: widget.maxValue,
               onChanged: (v) {
                 widget.onChanged(v);
-                if (!_editing) _ctrl.text = v.toStringAsFixed(1);
+                _ctrl.text = v.toStringAsFixed(1);
+                _onTextChange(_ctrl.text);
               },
             ),
           ),

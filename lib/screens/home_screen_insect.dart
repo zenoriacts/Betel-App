@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
 import '../services/inference_service_insect.dart';
 import '../models/detection_result.dart';
+import '../utils/image_validator.dart';
 import '../widgets/detection_overlay.dart';
 import '../widgets/result_panel.dart';
 import '../widgets/ood_badge.dart';
@@ -24,6 +25,7 @@ class _InsectHomeScreenState extends State<InsectHomeScreen>
   String? _imagePath;
   DetectionResult? _result;
   bool _isLoading = false;
+  bool _lowConfidence = false;
   String? _errorMessage;
 
   late AnimationController _pulseController;
@@ -58,31 +60,75 @@ class _InsectHomeScreenState extends State<InsectHomeScreen>
       setState(() {
         _imagePath = picked.path;
         _result = null;
+        _lowConfidence = false;
         _errorMessage = null;
         _isLoading = true;
       });
 
+      final bytes = await File(picked.path).readAsBytes();
+
+      // ── Image Validation (compute isolate) ──
+      final validation = await ImageValidator.validateImage(
+        bytes: bytes,
+        filename: picked.name.isNotEmpty ? picked.name : picked.path,
+      );
+
+      if (!validation.isValid) {
+        if (!mounted) return;
+        setState(() {
+          _isLoading = false;
+          _errorMessage = validation.errorMessage;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(validation.errorMessage!),
+            action: SnackBarAction(
+              label: 'Retake',
+              onPressed: () => _pickImage(source),
+            ),
+          ),
+        );
+        return;
+      }
+
       final result = await _inferenceService.runInference(picked.path);
 
       if (mounted) {
+        // Low confidence check
+        final topConf = result.finalConfidence ??
+            (result.detections.isNotEmpty
+                ? result.detections.first.confidence
+                : 1.0);
+        if (!result.isOod &&
+            result.detections.isNotEmpty &&
+            !ImageValidator.isConfidenceSufficient(topConf)) {
+          setState(() {
+            _result = null;
+            _lowConfidence = true;
+            _isLoading = false;
+          });
+          return;
+        }
+
         setState(() {
           _result = result;
+          _lowConfidence = false;
           _isLoading = false;
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Error: ${e.toString()}';
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Error: ${e.toString()}';
+      });
     }
   }
 
   void _reset() => setState(() {
     _imagePath = null;
     _result = null;
+    _lowConfidence = false;
     _errorMessage = null;
   });
 
@@ -329,6 +375,7 @@ class _InsectHomeScreenState extends State<InsectHomeScreen>
         children: [
           _buildImageSection(),
           if (_isLoading) _buildLoadingSection(),
+          if (_lowConfidence) _buildLowConfidenceCard(),
           if (_errorMessage != null) _buildErrorSection(),
           if (_result != null) ...[
             OodBadge(result: _result!),
@@ -362,6 +409,66 @@ class _InsectHomeScreenState extends State<InsectHomeScreen>
             ),
           ),
           const SizedBox(height: 32),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLowConfidenceCard() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.warning.withOpacity(0.5), width: 1.2),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.warning.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.help_outline_rounded,
+              color: AppColors.warning,
+              size: 36,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            ImageValidator.lowConfidenceMsg,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'The model could not detect insects with sufficient confidence (< 60%).',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 18),
+          ElevatedButton.icon(
+            onPressed: () => _pickImage(ImageSource.camera),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retake Photo'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
         ],
       ),
     );

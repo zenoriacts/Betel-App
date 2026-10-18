@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
 import '../services/model_initializer.dart';
 import '../models/inference_result.dart';
+import '../utils/image_validator.dart';
 import '../widgets/result_card.dart';
 import '../widgets/confidence_bars.dart';
 import '../widgets/ood_indicator.dart';
@@ -37,6 +38,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
   InferenceResult? _result;
   bool _analyzing = false;
   bool _initializing = false;
+  bool _lowConfidence = false;
   String? _error;
 
   @override
@@ -86,14 +88,52 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
       setState(() {
         _imageBytes = bytes;
         _result = null;
+        _lowConfidence = false;
         _analyzing = true;
         _error = null;
       });
 
+      // ── Image Quality & Format Validation (compute isolate) ──
+      final validation = await ImageValidator.validateImage(
+        bytes: bytes,
+        filename: picked.name.isNotEmpty ? picked.name : picked.path,
+      );
+
+      if (!validation.isValid) {
+        if (!mounted) return;
+        setState(() {
+          _analyzing = false;
+          _error = validation.errorMessage;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(validation.errorMessage!),
+            action: SnackBarAction(
+              label: 'Retake',
+              onPressed: () => _pickImage(fromCamera),
+            ),
+          ),
+        );
+        return;
+      }
+
       final result = await _init.service.predict(bytes);
       if (!mounted) return;
+
+      // ── Low Confidence Check ──
+      if (!result.isOod &&
+          !ImageValidator.isConfidenceSufficient(result.confidence ?? 0)) {
+        setState(() {
+          _result = null;
+          _lowConfidence = true;
+          _analyzing = false;
+        });
+        return;
+      }
+
       setState(() {
         _result = result;
+        _lowConfidence = false;
         _analyzing = false;
       });
     } catch (e) {
@@ -192,6 +232,8 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
 
           if (_analyzing)
             const _AnalyzingCard()
+          else if (_lowConfidence)
+            _buildLowConfidenceCard()
           else if (_error != null)
             _InlineError(message: _error!, onRetry: () => _pickImage(false))
           else if (_result != null) ...[
@@ -255,6 +297,66 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
               label: 'Gallery',
               color: AppColors.purple,
               onTap: () => _pickImage(false),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLowConfidenceCard() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.warning.withOpacity(0.5), width: 1.2),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.warning.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.help_outline_rounded,
+              color: AppColors.warning,
+              size: 36,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            ImageValidator.lowConfidenceMsg,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'The model could not detect a confident quality grade (confidence < 60%).',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 18),
+          ElevatedButton.icon(
+            onPressed: () => _pickImage(widget.useCamera),
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retake Photo'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
           ),
         ],

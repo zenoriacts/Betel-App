@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
 import '../services/inference_service_disease.dart';
+import '../utils/image_validator.dart';
 import '../widgets/result_card_disease.dart';
 import '../widgets/image_source_sheet.dart';
 
@@ -25,6 +26,7 @@ class _DiseaseHomeScreenState extends State<DiseaseHomeScreen>
   PredictionResult? _result;
   bool _isAnalyzing = false;
   String? _errorMessage;
+  bool _lowConfidence = false;
 
   // ── Image picking ─────────────────────────────────────────
   Future<void> _pickFromCamera() async {
@@ -34,7 +36,15 @@ class _DiseaseHomeScreenState extends State<DiseaseHomeScreen>
         preferredCameraDevice: CameraDevice.rear,
         imageQuality: 90,
       );
-      if (xFile != null) await _analyse(xFile);
+      if (xFile != null) {
+        setState(() {
+          _selectedImage = File(xFile.path);
+          _result = null;
+          _lowConfidence = false;
+          _errorMessage = null;
+        });
+        await _analyse(xFile);
+      }
     } catch (e) {
       _showError('Camera error: $e');
     }
@@ -46,7 +56,15 @@ class _DiseaseHomeScreenState extends State<DiseaseHomeScreen>
         source: ImageSource.gallery,
         imageQuality: 90,
       );
-      if (xFile != null) await _analyse(xFile);
+      if (xFile != null) {
+        setState(() {
+          _selectedImage = File(xFile.path);
+          _result = null;
+          _lowConfidence = false;
+          _errorMessage = null;
+        });
+        await _analyse(xFile);
+      }
     } catch (e) {
       _showError('Gallery error: $e');
     }
@@ -56,22 +74,58 @@ class _DiseaseHomeScreenState extends State<DiseaseHomeScreen>
     setState(() {
       _selectedImage = File(xFile.path);
       _result = null;
+      _lowConfidence = false;
       _isAnalyzing = true;
       _errorMessage = null;
     });
 
     try {
-      // FIX: ensure the model is initialized before predicting
-      await widget.inferenceService.init();
-
       final bytes = await xFile.readAsBytes();
-      final result = await widget.inferenceService.predict(bytes);
-      if (mounted) {
+
+      // ── Image Quality & Format Validation (compute isolate) ──
+      final validation = await ImageValidator.validateImage(
+        bytes: bytes,
+        filename: xFile.name.isNotEmpty ? xFile.name : xFile.path,
+      );
+
+      if (!validation.isValid) {
+        if (!mounted) return;
         setState(() {
-          _result = result;
           _isAnalyzing = false;
+          _errorMessage = validation.errorMessage;
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(validation.errorMessage!),
+            action: SnackBarAction(
+              label: 'Retake',
+              onPressed: _openSourceSheet,
+            ),
+          ),
+        );
+        return;
       }
+
+      // Ensure model is initialized before predicting
+      await widget.inferenceService.init();
+      final result = await widget.inferenceService.predict(bytes);
+      if (!mounted) return;
+
+      // ── Low Confidence Check ──
+      if (!result.isOod && !ImageValidator.isConfidenceSufficient(result.confidence)) {
+        setState(() {
+          _isAnalyzing = false;
+          _lowConfidence = true;
+          _result = null;
+        });
+        return;
+      }
+
+      setState(() {
+        _result = result;
+        _lowConfidence = false;
+        _isAnalyzing = false;
+      });
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -293,13 +347,22 @@ class _DiseaseHomeScreenState extends State<DiseaseHomeScreen>
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
-        onPressed: (_selectedImage == null || _isAnalyzing)
+        onPressed: _isAnalyzing
             ? null
             : () async {
-                if (_selectedImage != null) {
-                  final bytes = await _selectedImage!.readAsBytes();
-                  await _analyse(XFile(_selectedImage!.path));
+                if (_selectedImage == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text(ImageValidator.noImageMsg),
+                      action: SnackBarAction(
+                        label: 'Select',
+                        onPressed: _openSourceSheet,
+                      ),
+                    ),
+                  );
+                  return;
                 }
+                await _analyse(XFile(_selectedImage!.path));
               },
         style: ElevatedButton.styleFrom(
           backgroundColor: Theme.of(context).colorScheme.primary,
@@ -329,6 +392,66 @@ class _DiseaseHomeScreenState extends State<DiseaseHomeScreen>
           _isAnalyzing ? 'Analysing…' : 'Analyse Leaf',
           style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700),
         ),
+      ),
+    );
+  }
+
+  Widget _buildLowConfidenceCard() {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.warning.withOpacity(0.5), width: 1.2),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.warning.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.help_outline_rounded,
+              color: AppColors.warning,
+              size: 36,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            ImageValidator.lowConfidenceMsg,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'The model could not detect a confident diagnosis (confidence < 60%).',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 18),
+          ElevatedButton.icon(
+            onPressed: _openSourceSheet,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Retake Photo'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -469,15 +592,19 @@ class _DiseaseHomeScreenState extends State<DiseaseHomeScreen>
               ),
               const SizedBox(height: 16),
 
-              // Analyse button (shown only when image selected and not already loading)
-              if (_selectedImage != null) ...[
-                _buildAnalysisButton(),
-                const SizedBox(height: 24),
-              ],
+              // Analyse button
+              _buildAnalysisButton(),
+              const SizedBox(height: 24),
 
               // Loading
               if (_isAnalyzing) ...[
                 _buildLoadingIndicator(),
+                const SizedBox(height: 24),
+              ],
+
+              // Low confidence warning
+              if (_lowConfidence) ...[
+                _buildLowConfidenceCard(),
                 const SizedBox(height: 24),
               ],
 
